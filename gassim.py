@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-
+from tqdm import tqdm
 
 class FlowTube:
-    def __init__(self, ydim, xdim, tau=0.6, density=100, randomness=0.2, avg_vel=2.5, start_param=1, inflow_vel=2, inflow_density=100, inflow_noise=0.1, outflow_density=50):
+    def __init__(self, ydim, xdim, tau=0.6, density=100, randomness=0.2, avg_vel=2.5, start_param=1, inflow_vel=2, inflow_density=100, inflow_noise=0.1, outflow_density=50, plot_every=1):
         # set global variables
         self.ydim = ydim
         self.xdim = xdim
@@ -14,6 +14,8 @@ class FlowTube:
         self.inflow_density = inflow_density
         self.inflow_noise = inflow_noise
         self.outflow_density = outflow_density
+        self.plot_every = plot_every
+        self.pbar = None
 
         # get physical positions of particles
         self.xlocs, self.ylocs = np.meshgrid(range(self.xdim), range(self.ydim))
@@ -175,6 +177,63 @@ class FlowTube:
         avg_x_flow = np.sum((self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1))*self.vel_x, axis=(0,2))/num_nodes
         return avg_x_flow / avg_rho
 
+    def init_anim(self):
+        self.fig, ((self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = plt.subplots(2,2)
+        
+        self.v_ax.set_title('Velocity Heat Map')
+        self.v_map = self.v_ax.imshow(self.get_velocity_frame())
+
+        self.d_ax.set_title('Density Heat Map')
+        self.d_map = self.d_ax.imshow(self.get_density_frame())
+
+        self.xv_ax.set_title('X Velocity')
+        self.xv_graph, = self.xv_ax.plot(self.get_x_velocity())
+        
+        self.xd_ax.set_title('X Density')
+        self.xd_graph, = self.xd_ax.plot(self.get_x_density())
+
+        return [self.v_map, self.d_map, self.xv_graph, self.xd_graph]
+        
+    def anim(self, i):
+        for _ in range(self.plot_every):
+            self.update_frame()
+        
+        if self.pbar is not None:
+            self.pbar.update(self.plot_every)
+
+        self.v_map.set_data(self.get_velocity_frame())
+        self.v_map.autoscale()
+
+        self.d_map.set_data(self.get_density_frame())
+        self.d_map.autoscale()
+
+        xv = self.get_x_velocity()
+        xv_mid = (np.min(xv) + np.max(xv))/2
+        xv_range = np.max(xv) - np.min(xv)
+        xv_range = max(xv_range, 1e-10)
+        self.xv_ax.set_ylim(xv_mid - xv_range * 0.6, xv_mid + xv_range * 0.6)
+        self.xv_graph.set_ydata(xv)
+
+        xd = self.get_x_density()
+        xd_mid = (np.min(xd) + np.max(xd))/2
+        xd_range = np.max(xd) - np.min(xd)
+        xd_range = max(xd_range, 1e-10)
+        self.xd_ax.set_ylim(xd_mid - xd_range * 0.6, xd_mid + xd_range * 0.6)
+        self.xd_graph.set_ydata(xd)
+
+        self.v_ax.figure.canvas.draw()
+        self.d_ax.figure.canvas.draw()
+        self.xv_ax.figure.canvas.draw()
+        self.xd_ax.figure.canvas.draw()
+
+        return [self.v_map, self.d_map, self.xd_graph, self.xv_graph]
+
+    def init_pbar(self, num_steps):
+        self.pbar = tqdm(total=num_steps)
+
+    def close_pbar(self):
+        self.pbar.close()
+    
     def anim_loop(self, N, plot_every=1, fps=30):
         velfig = plt.subplot(2, 2, 1)
         velfig.set_title('Velocity Heat Map')
@@ -230,5 +289,13 @@ if __name__ == '__main__':
         inflow_vel=1,
         inflow_noise=0.1,
         inflow_density=100,
-        outflow_density=None)
-    ft.anim_loop(10000, 10, 15)
+        outflow_density=None,
+        plot_every=10)
+    gifwriter = animation.PillowWriter(fps=20)
+    ft.init_anim()
+    num_steps = 1000
+    num_frames = num_steps//ft.plot_every
+    ft.init_pbar(num_steps)
+    anim = animation.FuncAnimation(ft.fig, ft.anim, frames=num_frames, interval=20, blit=True)
+    anim.save('animation.gif', writer=gifwriter)
+    # plt.show()
