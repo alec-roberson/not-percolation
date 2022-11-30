@@ -53,10 +53,10 @@ class FlowTube:
         # self.F[:,0,:] *= self.inflow_density / rho_inflow
         
         self.F[:, 0, :] = 0 # self.inflow_noise * np.random.randn(self.ydim, self.nvels)
-        self.F[:,0,[2,3,4]] = self.inflow_vel * np.ones((self.ydim, 3))
-        
-        rho_inflow = np.sum(self.F[:,0,[2,3,4]], axis=1).reshape(self.ydim, 1)
-        self.F[:,0,[2,3,4]] *= self.inflow_density / rho_inflow
+        self.F[:,0,:] = self.inflow_noise * np.random.randn(self.ydim, self.nvels)
+        self.F[:,0,3] += self.inflow_vel * np.ones((self.ydim,))        
+        rho_inflow = np.sum(self.F[:,0,:], axis=1).reshape(self.ydim, 1)
+        self.F[:,0,:] *= self.inflow_density / rho_inflow
         # update sink edge, no flow can come back
         # self.F[:, -1, [6,7,8]] = self.outflow_noise * np.random.randn(self.ydim, 3)
 
@@ -64,18 +64,23 @@ class FlowTube:
         ''' Updates the frame.
         '''
 
+        self.update_source_sink()
 
         # drift velocities
         for i, cy, cx in zip(range(self.nvels), self.vel_y, self.vel_x):
             self.F[:, :, i] = np.roll(self.F[:, :, i], cx, axis = 1)
             self.F[:, :, i] = np.roll(self.F[:, :, i], cy, axis = 0)
-        
+            # disallow wrap around for x
+            if cx == -1:
+                self.F[:, -1, i] = 0
+            elif cx == 1:
+                self.F[:, 0, i] = 0
+
 
         # reflect velocities along boundaries
         boundaryF = self.F[self.boundaries, :]
         boundaryF = boundaryF[:, [0, 5, 6, 7, 8, 1, 2, 3, 4]]
         
-        self.update_source_sink()
 
         # fluid variables
         rho = np.sum(self.F, axis=2)
@@ -86,8 +91,8 @@ class FlowTube:
         Feq = np.zeros_like(self.F)
         for i, cy, cx, w in zip(range(self.nvels), self.vel_y, self.vel_x, self.weights):
             Feq[:, :, i] = w * rho * (1 + 3 * (cx * ux + cy * uy) + 9/2 * (cx * ux + cy * uy) ** 2 - 3/2 * (ux ** 2 + uy ** 2))
-        self.F += -(1/self.tau)*(self.F - Feq)
-        # self.F[:,1:-1] += -(1/self.tau)*(self.F[:,1:-1] - Feq[:,1:-1])
+        # self.F += -(1/self.tau)*(self.F - Feq)
+        self.F[:,1:-1] += -(1/self.tau)*(self.F[:,1:-1] - Feq[:,1:-1])
 
         # apply boundary conditions
         self.F[self.boundaries, :] = boundaryF
@@ -117,7 +122,7 @@ class FlowTube:
         uy[self.boundaries] = 0
         curl = (np.roll(ux, -1, axis=0) - np.roll(ux, 1, axis=0)) - (np.roll(uy, -1, axis=1) - np.roll(uy, 1, axis=1))
         curl[self.boundaries] = 0
-        return curl
+        return curl[:,1:-1]
     
     def total(self):
         F = self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1)
@@ -125,6 +130,7 @@ class FlowTube:
     
     def get_x_density(self):
         return np.sum(self.F[:,1:-1] * ~self.boundaries[:,1:-1].reshape(self.ydim, self.xdim-2, 1), axis=(0,2))/np.sum(1-self.boundaries[:,1:-1], axis=0)
+
     def get_x_velocity(self):
         return np.sum(
             (self.F[:,1:-1] * ~self.boundaries[:,1:-1].reshape(self.ydim, self.xdim-2, 1))*self.vel_x, axis=(0,2))/np.sum(1-self.boundaries[:,1:-1], axis=0)
@@ -174,10 +180,10 @@ if __name__ == '__main__':
         tau=3, 
         density=100, 
         randomness=0.1,
-        avg_vel=1, 
+        avg_vel=1,
         start_param=1, 
-        inflow_vel=1, 
-        inflow_density=50, 
+        inflow_vel=3,
         inflow_noise=0.1, 
+        inflow_density=50, 
         outflow_noise=0.1)
     ft.anim_loop(10000, 10, 15)
