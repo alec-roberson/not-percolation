@@ -1,0 +1,21 @@
+{   
+    "args":{
+        "ydim":200,
+        "xdim":800,
+        "tau":5, 
+        "density":100, 
+        "randomness":0.1,
+        "avg_vel":1,
+        "start_param":1,
+        "inflow_vel":1,
+        "inflow_density":100,
+        "inflow_noise":0.1,
+        "outflow_density":90,
+        "plot_every":10
+    },
+    "config":{
+        "output_dir":"./output",
+        "fps":20,
+        "num_steps":5000
+    }
+}

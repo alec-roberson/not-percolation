@@ -2,6 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from tqdm import tqdm
+import os
+import json
+import shutil
+
 
 class FlowTube:
     def __init__(self, ydim, xdim, tau=0.6, density=100, randomness=0.2, avg_vel=2.5, start_param=1, inflow_vel=2, inflow_density=100, inflow_noise=0.1, outflow_density=50, plot_every=1):
@@ -280,22 +284,30 @@ class FlowTube:
                 plt.pause(1/fps)
 
 if __name__ == '__main__':
-    ft = FlowTube(200, 600,
-        tau=5, 
-        density=100, 
-        randomness=0.1,
-        avg_vel=1,
-        start_param=1,
-        inflow_vel=1,
-        inflow_noise=0.1,
-        inflow_density=100,
-        outflow_density=None,
-        plot_every=10)
-    gifwriter = animation.PillowWriter(fps=20)
+    # Check input
+    if not os.path.isfile('./variables.json'):
+        print('Error: variables.json not found')
+        exit(1)
+    # Read variables
+    with open('./variables.json', 'r') as f:
+        invars = json.load(f)
+        cfg = invars['config']
+        args = invars['args']
+    # Check output
+    if os.path.isdir(cfg['output_dir']):
+        print('Error: output directory already exists')
+        exit(1)
+    # Set up the simulation
+    ft = FlowTube(**args)
+
+    gifwriter = animation.PillowWriter(fps=cfg['fps'])
     ft.init_anim()
-    num_steps = 1000
+    num_steps = cfg['num_steps']
     num_frames = num_steps//ft.plot_every
     ft.init_pbar(num_steps)
-    anim = animation.FuncAnimation(ft.fig, ft.anim, frames=num_frames, interval=20, blit=True)
-    anim.save('animation.gif', writer=gifwriter)
-    # plt.show()
+    anim = animation.FuncAnimation(ft.fig, ft.anim, frames=num_frames, blit=True)
+    
+    # save stuff
+    os.makedirs(cfg['output_dir'])
+    shutil.copy('./variables.json', os.path.join(cfg['output_dir'], 'variables.json'))
+    anim.save(os.path.join(cfg['output_dir'], 'animation.gif'), writer=gifwriter)
