@@ -39,7 +39,10 @@ class FlowTube:
         self.boundaries[-1, :] = True
 
         # add cylinder
-        for x, y in zip([self.xdim/4]*4+[self.xdim/4+5*self.ydim / 32]*3+[self.xdim/4+5*self.ydim / 16]*4, [1/8*self.ydim, 3/8*self.ydim, 5/8*self.ydim, 7/8*self.ydim]+[1/4*self.ydim, 1/2*self.ydim, 3/4*self.ydim]+[1/8*self.ydim, 3/8*self.ydim, 5/8*self.ydim, 7/8*self.ydim]):
+        for x, y in zip(
+            [self.xdim/4]*4+[self.xdim/4+6*self.ydim / 32]*3+[self.xdim/4+2*6*self.ydim / 32]*4
+            +[self.xdim/4+3*6*self.ydim / 32]*3+[self.xdim/4+4*6*self.ydim / 32]*4,
+            [1/8*self.ydim, 3/8*self.ydim, 5/8*self.ydim, 7/8*self.ydim]+[1/4*self.ydim, 1/2*self.ydim, 3/4*self.ydim]+[1/8*self.ydim, 3/8*self.ydim, 5/8*self.ydim, 7/8*self.ydim]+[1/4*self.ydim, 1/2*self.ydim, 3/4*self.ydim]+[1/8*self.ydim, 3/8*self.ydim, 5/8*self.ydim, 7/8*self.ydim]):
             self.boundaries += (self.xlocs - x) ** 2 + (self.ylocs - y) ** 2 < (3*self.ydim / 32) ** 2
 
         # add padding to boundaries
@@ -50,7 +53,7 @@ class FlowTube:
             # self.boundaries[:,-1:], 
             self.boundaries[:,-1:]], axis=1)
 
-        self.F[self.boundaries] = 1e-10
+        # self.F[self.boundaries] = 1e-10
 
     def get_source(self):        
         # set the input flow
@@ -167,25 +170,28 @@ class FlowTube:
         return np.sum(self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1), axis=(0,2))/np.sum(1-self.boundaries, axis=0)
 
     def get_x_velocity(self):
-        return np.sum(
-            (self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1))*self.vel_x, axis=(0,2))/np.sum(1-self.boundaries, axis=0)
+        num_nodes = np.sum(1-self.boundaries, axis=0)
+        avg_rho = np.sum(self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1), axis=(0,2))/num_nodes
+        avg_x_flow = np.sum((self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1))*self.vel_x, axis=(0,2))/num_nodes
+        return avg_x_flow / avg_rho
 
     def anim_loop(self, N, plot_every=1, fps=30):
-        velfig = plt.subplot(5, 1, 1)
+        velfig = plt.subplot(2, 2, 1)
         velfig.set_title('Velocity Heat Map')
         velim = velfig.imshow(self.get_velocity_frame())
-        rhofig = plt.subplot(5, 1, 2)
+        rhofig = plt.subplot(2, 2, 3)
         rhofig.set_title('Density Heat Map')
         rhoim = rhofig.imshow(self.get_density_frame())
-        curlfig = plt.subplot(5, 1, 3)
-        curlfig.set_title('Curl Heat Map')
-        curlim = curlfig.imshow(self.get_curl_frame(), cmap='bwr')
-        xd_fig = plt.subplot(5,1,4)
+        # curlfig = plt.subplot(3, 2, 5)
+        # curlfig.set_title('Curl Heat Map')
+        # curlim = curlfig.imshow(self.get_curl_frame(), cmap='bwr')
+        xd_fig = plt.subplot(2,2,2)
         xd_fig.set_title('X Density')
-        xd_fig.plot(self.get_x_density())
-        xv_fig = plt.subplot(5,1,5)
-        xv_fig.set_title('X Density')
-        xv_fig.plot(self.get_x_velocity())
+        xd_l, = xd_fig.plot(self.get_x_density())
+        xv_fig = plt.subplot(2,2,4)
+        xv_fig.set_title('X Velocity')
+        xv_l, = xv_fig.plot(self.get_x_velocity())
+        plt.tight_layout(pad=1)
         for i in range(N):
             self.update_frame()
             if i % plot_every == 0:
@@ -195,30 +201,34 @@ class FlowTube:
                 rhoim.set_data(self.get_density_frame())
                 rhoim.autoscale()
 
-                cframe = self.get_curl_frame()
-                curlim.set_data(cframe)
-                l = np.max(np.abs(cframe))
-                curlim.set_clim(-l, l)
+                # cframe = self.get_curl_frame()
+                # curlim.set_data(cframe)
+                # l = np.max(np.abs(cframe))
+                # curlim.set_clim(-l, l)
 
-                xd_fig.clear()
-                xd_fig.plot(self.get_x_density())
-                xd_fig.autoscale()
+                xd = self.get_x_density()
+                xd_l.set_ydata(xd)
+                xd_mid = (np.min(xd) + np.max(xd))/2
+                xd_range = np.max(xd) - np.min(xd)
+                xd_fig.set_ylim(xd_mid - xd_range * 0.6, xd_mid + xd_range * 0.6)
                 
-                xv_fig.clear()
-                xv_fig.plot(self.get_x_velocity())
-                xv_fig.autoscale()
+                xv = self.get_x_velocity()
+                xv_l.set_ydata(xv)
+                xv_mid = (np.min(xv) + np.max(xv))/2
+                xv_range = np.max(xv) - np.min(xv)
+                xv_fig.set_ylim(xv_mid - xv_range * 0.6, xv_mid + xv_range * 0.6)
+
                 plt.pause(1/fps)
-                print(self.total())
 
 if __name__ == '__main__':
-    ft = FlowTube(100, 600,
+    ft = FlowTube(200, 600,
         tau=5, 
-        density=10, 
+        density=100, 
         randomness=0.1,
         avg_vel=1,
-        start_param=1, 
+        start_param=1,
         inflow_vel=1,
-        inflow_noise=0.1, 
-        inflow_density=10, 
+        inflow_noise=0.1,
+        inflow_density=100,
         outflow_density=None)
     ft.anim_loop(10000, 10, 15)
