@@ -5,10 +5,121 @@ from tqdm import tqdm
 import os
 import json
 import shutil
+import cv2
 
+def get_circle_plug_map(ydim, xdim, loc, num_per_col, num_col, rad, col_spacing, packing_method):
+    # copute vertical spacing, calculate radius in pixels
+    vert_spacing = int(ydim/num_per_col)
+    rad = int(rad*vert_spacing/2)
+    # convert col spacing and xloc to pixels
+    if packing_method == 'standard':
+        col_spacing = int(col_spacing*vert_spacing)
+    elif packing_method == 'tight':
+        col_spacing = int(2*rad*col_spacing)
+    else:
+        raise ValueError(f'Invalid packing method "{packing_method}"')
+    xloc = int(xdim*loc)
+    # calculate first row x position
+    xloc0 = xloc - int((num_col-1)*col_spacing/2)
+    # initialize output array
+    arr = np.zeros((ydim, xdim))
+    for i in range(num_col):
+        # calculate x position
+        x = xloc0 + i*col_spacing
+        # determine first position and such based on even/odd cols
+        if i % 2 == 0:
+            yloc0 = int(vert_spacing/2)
+            num_circs = num_per_col
+        else:
+            yloc0 = 0
+            num_circs = num_per_col + 1
+        # draw circles
+        for j in range(num_circs):
+            y = yloc0 + j*vert_spacing
+            arr = cv2.circle(arr, (x, y), rad, 1, -1)
+    return np.array(arr, dtype=bool).reshape(ydim, xdim)
+
+def get_square_plug_map(ydim, xdim, loc, num_per_col, num_col, a, col_spacing):
+    # copute vertical spacing, calculate a in pixels
+    vert_spacing = int(ydim/num_per_col)
+    a = int(a*vert_spacing/2)
+    # convert col spacing and xloc to pixels
+    col_spacing = int(col_spacing*vert_spacing)
+    xloc = int(xdim*loc)
+    # calculate first row x position
+    xloc0 = xloc - int((num_col-1)*col_spacing/2)
+    # initialize output array
+    arr = np.zeros((ydim, xdim))
+    for i in range(num_col):
+        # calculate x position
+        x = xloc0 + i*col_spacing
+        # determine first position and such based on even/odd cols
+        if i % 2 == 0:
+            yloc0 = int(vert_spacing/2)
+            num_circs = num_per_col
+        else:
+            yloc0 = 0
+            num_circs = num_per_col + 1
+        # draw circles
+        for j in range(num_circs):
+            y = yloc0 + j*vert_spacing
+            arr = cv2.rectangle(arr, (x-a, y-a), (x+a,y+a), 1, -1)
+    return np.array(arr, dtype=bool).reshape(ydim, xdim)
+
+def get_triangle_plug_map(ydim, xdim, loc, num_per_col, num_col, a, col_spacing):
+    # copute vertical spacing, calculate a in pixels
+    vert_spacing = int(ydim/num_per_col)
+    a = int(a*vert_spacing/2)
+    # convert col spacing and xloc to pixels
+    col_spacing = int(col_spacing*vert_spacing)
+    xloc = int(xdim*loc)
+    # calculate first row x position
+    xloc0 = xloc - int((num_col-1)*col_spacing/2)
+    # initialize output array
+    arr = np.zeros((ydim, xdim))
+    for i in range(num_col):
+        # calculate x position
+        x = xloc0 + i*col_spacing
+        # determine first position and such based on even/odd cols
+        if i % 2 == 0:
+            yloc0 = int(vert_spacing/2)
+            num_circs = num_per_col
+        else:
+            yloc0 = 0
+            num_circs = num_per_col + 1
+        # draw circles
+        for j in range(num_circs):
+            y = yloc0 + j*vert_spacing
+            print([(x-a, y-a), (x+a, y), (x-a, y+a)])
+            arr = cv2.fillConvexPoly(arr, np.array([(x-a, y-a), (x+a, y), (x-a, y+a)]), (1,))
+    return np.array(arr, dtype=bool).reshape(ydim, xdim)
+
+def get_smiley_plug_map(ydim, xdim, loc, **kwargs):
+    # convert loc to pixels
+    xloc = int(xdim*loc)
+    # initialize output array
+    arr = np.zeros((ydim, xdim))
+    # draw smile
+    arr = cv2.ellipse(arr, (xloc, int(ydim/2)), (int(ydim/4), int(ydim/4)), 0, 30, 150, 1, int(ydim/20))
+    # draw eyes
+    arr = cv2.circle(arr, (xloc-int(ydim/6), int(ydim/3)), int(ydim/10), 1, -1)
+    arr = cv2.circle(arr, (xloc+int(ydim/6), int(ydim/3)), int(ydim/10), 1, -1)
+    return np.array(arr, dtype=bool).reshape(ydim, xdim)
+
+def get_plug_map(ydim, xdim, plug_type, **kwargs):
+    if plug_type == 'circle':
+        return get_circle_plug_map(ydim, xdim, **kwargs)
+    elif plug_type == 'square':
+        return get_square_plug_map(ydim, xdim, **kwargs)
+    elif plug_type == 'triangle':
+        return get_triangle_plug_map(ydim, xdim, **kwargs)
+    elif plug_type == 'smiley':
+        return get_smiley_plug_map(ydim, xdim, **kwargs)
+    elif plug_type == 'none':
+        return None
 
 class FlowTube:
-    def __init__(self, ydim, xdim, tau=0.6, density=100, randomness=0.2, avg_vel=2.5, start_param=1, inflow_vel=2, inflow_density=100, inflow_noise=0.1, outflow_density=50, plot_every=1):
+    def __init__(self, ydim, xdim, plug_map=None, tau=0.6, density=100, randomness=0.2, avg_vel=2.5, start_param=1, inflow_vel=2, inflow_density=100, inflow_noise=0.1, outflow_density=50, plot_every=1):
         # set global variables
         self.ydim = ydim
         self.xdim = xdim
@@ -44,12 +155,9 @@ class FlowTube:
         self.boundaries[0, :] = True
         self.boundaries[-1, :] = True
 
-        # add cylinder
-        for x, y in zip(
-            [self.xdim/4]*4+[self.xdim/4+6*self.ydim / 32]*3+[self.xdim/4+2*6*self.ydim / 32]*4
-            +[self.xdim/4+3*6*self.ydim / 32]*3+[self.xdim/4+4*6*self.ydim / 32]*4,
-            [1/8*self.ydim, 3/8*self.ydim, 5/8*self.ydim, 7/8*self.ydim]+[1/4*self.ydim, 1/2*self.ydim, 3/4*self.ydim]+[1/8*self.ydim, 3/8*self.ydim, 5/8*self.ydim, 7/8*self.ydim]+[1/4*self.ydim, 1/2*self.ydim, 3/4*self.ydim]+[1/8*self.ydim, 3/8*self.ydim, 5/8*self.ydim, 7/8*self.ydim]):
-            self.boundaries += (self.xlocs - x) ** 2 + (self.ylocs - y) ** 2 < (3*self.ydim / 32) ** 2
+        # add plug
+        if not plug_map is None:
+            self.boundaries += plug_map
 
         # add padding to boundaries
         self.padded_boundaries = np.concatenate([
@@ -58,8 +166,6 @@ class FlowTube:
             self.boundaries, 
             # self.boundaries[:,-1:], 
             self.boundaries[:,-1:]], axis=1)
-
-        # self.F[self.boundaries] = 1e-10
 
     def get_source(self):        
         # set the input flow
@@ -183,6 +289,7 @@ class FlowTube:
 
     def init_anim(self):
         self.fig, ((self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = plt.subplots(2,2)
+        plt.tight_layout(pad=1.4)
         
         self.v_ax.set_title('Velocity Heat Map')
         self.v_map = self.v_ax.imshow(self.get_velocity_frame())
@@ -293,13 +400,14 @@ if __name__ == '__main__':
         invars = json.load(f)
         cfg = invars['config']
         args = invars['args']
+        plug_args = invars['plug']
     # Check output
     if os.path.isdir(cfg['output_dir']):
         print('Error: output directory already exists')
         exit(1)
     # Set up the simulation
-    ft = FlowTube(**args)
-
+    plug_map = get_plug_map(args['ydim'], args['xdim'], **plug_args)
+    ft = FlowTube(**args, plug_map=plug_map)
     gifwriter = animation.PillowWriter(fps=cfg['fps'])
     ft.init_anim()
     num_steps = cfg['num_steps']

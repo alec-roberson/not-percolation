@@ -1,7 +1,7 @@
 {   
     "args":{
-        "ydim":200,
-        "xdim":800,
+        "ydim":100,
+        "xdim":500,
         "tau":5, 
         "density":100, 
         "randomness":0.1,
@@ -9,13 +9,23 @@
         "start_param":1,
         "inflow_vel":1,
         "inflow_density":100,
-        "inflow_noise":0.1,
-        "outflow_density":90,
+        "inflow_noise":0.01,
+        "outflow_density":null,
         "plot_every":10
     },
+    "plug":{
+        "plug_type": "none",
+        "loc":0.7,
+        "num_per_col":5,
+        "num_col":5,
+        "rad":0.5,
+        "col_spacing":1.0,
+        "packing_method":"tight"
+    },
     "config":{
-        "output_dir":"./output",
-        "fps":20,
-        "num_steps":5000
-    }
+        "output_dir":"./testing-5-6",
+        "fps":10,
+        "num_steps":1000
+    },
+    "notes":""
 }
