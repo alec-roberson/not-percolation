@@ -119,16 +119,16 @@ def get_plug_map(ydim, xdim, plug_type, **kwargs):
         return None
 
 class FlowTube:
-    def __init__(self, ydim, xdim, plug_map=None, tau=0.6, density=100, randomness=0.2, avg_vel=2.5, start_param=1, inflow_vel=2, inflow_density=100, inflow_noise=0.1, outflow_density=50, plot_every=1):
+    def __init__(self, ydim, xdim, plug_map=None, tau=0.6, init_noise=0.2, inflow_density=100, inflow_noise=0.1, outflow_density=50, outflow_noise=0.1, plot_every=1):
         # set global variables
         self.ydim = ydim
         self.xdim = xdim
         self.tau = tau
-        self.avg_vel = avg_vel
-        self.inflow_vel = inflow_vel
+        # self.inflow_vel = inflow_vel
         self.inflow_density = inflow_density
         self.inflow_noise = inflow_noise
         self.outflow_density = outflow_density
+        self.outflow_noise = outflow_noise
         self.plot_every = plot_every
         self.pbar = None
 
@@ -142,16 +142,17 @@ class FlowTube:
         self.weights = np.array([4/9, 1/9, 1/36, 1/9, 1/36, 1/9, 1/36, 1/9, 1/36])
 
         # create lattice & setup initial conditions
-        self.F = np.ones((self.ydim, self.xdim, self.nvels)) * start_param
-        self.F += randomness * np.random.randn(ydim, xdim, self.nvels)
-        self.F[:, :, 3] += self.avg_vel
+        self.F = np.ones((self.ydim, self.xdim, self.nvels))
+        self.F += init_noise * np.random.randn(ydim, xdim, self.nvels)
         rho = np.sum(self.F, axis=2).reshape(self.ydim, self.xdim, 1)
-        self.F = self.F * density/rho
+        xrho_distribution = np.linspace(self.inflow_density*2, self.outflow_density*2, self.xdim).reshape(1, self.xdim, 1)
+        self.F = self.F * (xrho_distribution/rho)
+
+        # make sure velocities are positive
+        self.F[self.F <= 0] = 1e-10
 
         # create boundary mapping
         self.boundaries = np.zeros((ydim, xdim), dtype=bool)
-        # self.boundaries[:, 0] = True
-        # self.boundaries[:, -1] = True
         self.boundaries[0, :] = True
         self.boundaries[-1, :] = True
 
@@ -161,10 +162,8 @@ class FlowTube:
 
         # add padding to boundaries
         self.padded_boundaries = np.concatenate([
-            # self.boundaries[:,0:1],
             self.boundaries[:,0:1], 
             self.boundaries, 
-            # self.boundaries[:,-1:], 
             self.boundaries[:,-1:]], axis=1)
 
     def get_source(self):        
@@ -172,34 +171,38 @@ class FlowTube:
 
         # correct the input flow density
 
-        source = np.zeros((self.ydim, self.nvels))
-        source[:,:] = self.inflow_noise * np.abs(np.random.randn(self.ydim, self.nvels))
-        source[:,[3]] += self.inflow_vel * np.ones((self.ydim, 1))
+        source = np.ones((self.ydim, self.nvels)) + self.inflow_noise * np.random.randn(self.ydim, self.nvels)
+        # source[:,[3]] += self.inflow_vel * np.ones((self.ydim, 1))
         rho_inflow = np.sum(source, axis=1).reshape(self.ydim, 1)
         source *= self.inflow_density / rho_inflow
 
         # apply a sinusoidal weighting
-        weights = 2*np.sin(np.linspace(0,1,self.ydim)*np.pi).reshape(self.ydim, 1)**2
-
-        source *= weights
+        # weights = 2*np.sin(np.linspace(0,1,self.ydim)*np.pi).reshape(self.ydim, 1)
+        # source *= weights
+        
+        # reshape, double, and output
         source = source.reshape(self.ydim, 1, self.nvels)
         source = np.concatenate([source, source], axis=1)
         return source
     
     def get_sink(self):
         # the sink will just average the values from the N columns
-        N = 20
-        M = 10
-        sink = np.mean(self.F[:,-1-N:-1-M,:], axis=1).reshape(self.ydim, 1, self.nvels)
+        N = 3
+        M = 1
         if not self.outflow_density is None:
-            rho_sink = np.sum(sink, axis=2).reshape(self.ydim, 1, 1)
+            sink = np.ones((self.ydim, 2, self.nvels)) + self.outflow_noise * np.random.randn(self.ydim, 2, self.nvels)
+            rho_sink = np.sum(sink, axis=2).reshape(self.ydim, 2, 1)
             sink *= self.outflow_density / rho_sink
-        sink = np.concatenate([sink, sink], axis=1)
+        else:
+            sink = np.mean(self.F[:,-1-N:-1-M,:], axis=1).reshape(self.ydim, 1, self.nvels)
+            sink = np.concatenate([sink, sink], axis=1)
         return sink
 
     def add_source_and_sink(self):
         # add padding, source on left sink on right
         self.F = np.concatenate([self.get_source(), self.F, self.get_sink()], axis=1)
+        # clean up array in case of any negative values
+        self.F[self.F <= 0] = 1e-10
 
     def strip_one_padding(self):
         # remove padding, source on left sink on right
@@ -227,7 +230,14 @@ class FlowTube:
         # reflect velocities along boundaries
         boundaryF = self.F[self.padded_boundaries, :]
         boundaryF = boundaryF[:, [0, 5, 6, 7, 8, 1, 2, 3, 4]]
-        
+        BOUNDARY_LOSS = 0
+        BOUNDARY_RANDOMNESS = 0.0
+        # apply noising to boundary velocities, maintain flow density
+        boundary_rho = np.sum(boundaryF, axis=1).reshape(boundaryF.shape[0], 1)
+        boundaryF += np.random.randn(*boundaryF.shape) * BOUNDARY_RANDOMNESS
+        boundaryF *= boundary_rho / np.sum(boundaryF, axis=1).reshape(boundaryF.shape[0], 1)
+        # apply boundary loss
+        boundaryF *= (1 - BOUNDARY_LOSS)
 
         # fluid variables
         rho = np.sum(self.F, axis=2)
@@ -287,8 +297,12 @@ class FlowTube:
         avg_x_flow = np.sum((self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1))*self.vel_x, axis=(0,2))/num_nodes
         return avg_x_flow / avg_rho
 
-    def init_anim(self):
-        self.fig, ((self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = plt.subplots(2,2)
+    def init_anim(self, dpi=None):
+        if dpi is not None:
+            self.fig = plt.figure(dpi=300)
+        else:
+            self.fig = plt.figure()
+        ((self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = self.fig.subplots(2,2)
         plt.tight_layout(pad=1.4)
         
         self.v_ax.set_title('Velocity Heat Map')
@@ -306,8 +320,9 @@ class FlowTube:
         return [self.v_map, self.d_map, self.xv_graph, self.xd_graph]
         
     def anim(self, i):
-        for _ in range(self.plot_every):
-            self.update_frame()
+        if i != 0:
+            for _ in range(self.plot_every):
+                self.update_frame()
         
         if self.pbar is not None:
             self.pbar.update(self.plot_every)
@@ -402,20 +417,22 @@ if __name__ == '__main__':
         args = invars['args']
         plug_args = invars['plug']
     # Check output
-    if os.path.isdir(cfg['output_dir']):
-        print('Error: output directory already exists')
-        exit(1)
+    outdir = cfg['output_dir']
+    i = 0
+    while os.path.isdir(outdir):
+        i += 1
+        outdir = cfg['output_dir'] + f' ({i})'
     # Set up the simulation
     plug_map = get_plug_map(args['ydim'], args['xdim'], **plug_args)
     ft = FlowTube(**args, plug_map=plug_map)
     gifwriter = animation.PillowWriter(fps=cfg['fps'])
-    ft.init_anim()
+    ft.init_anim(dpi=cfg['dpi'])
     num_steps = cfg['num_steps']
     num_frames = num_steps//ft.plot_every
     ft.init_pbar(num_steps)
     anim = animation.FuncAnimation(ft.fig, ft.anim, frames=num_frames, blit=True)
     
     # save stuff
-    os.makedirs(cfg['output_dir'])
-    shutil.copy('./variables.json', os.path.join(cfg['output_dir'], 'variables.json'))
-    anim.save(os.path.join(cfg['output_dir'], 'animation.gif'), writer=gifwriter)
+    os.makedirs(outdir)
+    shutil.copy('./variables.json', os.path.join(outdir, 'variables.json'))
+    anim.save(os.path.join(outdir, 'animation.gif'), writer=gifwriter)
