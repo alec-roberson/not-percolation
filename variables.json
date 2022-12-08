@@ -4,7 +4,7 @@
         "xdim":300,
         "tau":1.0, 
         "init_noise":0.1,
-        "inflow_density":200,
+        "inflow_density":400,
         "inflow_noise":0.5,
         "outflow_density":100,
         "outflow_noise":0.1,

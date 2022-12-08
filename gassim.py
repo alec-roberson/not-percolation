@@ -435,14 +435,13 @@ class FlowTube:
 
     def get_temperature_frame(self):
         rho = np.sum(self.F, axis=2)
-        macro_vels = np.matmul(self.F, self.vels)/rho.reshape(*rho.shape, 1)
-        diff_sq_vels = np.sum((self.vels.reshape(1,1,self.nvels,2) - macro_vels.reshape(self.ydim, self.xdim, 1, 2))**2, axis=3)
-        mean_squared_vel = np.sum(self.F * diff_sq_vels, axis=2)/rho
-        mean_KE = 0.5 * self.particle_mass * mean_squared_vel
-        out = (mean_KE / KB)*(1-self.boundaries)
-        a = np.min(out[self.boundaries == 0])
-        b = np.max(out[self.boundaries == 0])
-        return out, a, b
+        macro_vels = np.matmul(self.F, self.vels)/np.expand_dims(rho,2)
+        micro_vels = np.expand_dims(self.F, 3)*np.expand_dims(self.vels, (0,1))/np.expand_dims(self.F, 3)
+        rel_sq_vels = np.linalg.norm(micro_vels - np.expand_dims(macro_vels,2), axis=3)**2
+        kinetic_energy = np.sum((rel_sq_vels*self.F), axis=2)/rho
+        temp = kinetic_energy/KB
+        temp = temp * (1-self.boundaries)
+        return temp, np.min(temp[self.boundaries==0]), np.max(temp[self.boundaries==0])
 
     def get_x_temperature(self):
         frame, _, _ = self.get_temperature_frame()
