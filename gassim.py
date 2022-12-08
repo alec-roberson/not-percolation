@@ -435,6 +435,7 @@ class FlowTube:
 
     def get_temperature_frame(self):
         rho = np.sum(self.F, axis=2)
+        sq_vels = np.linalg.norm(self.vels, axis=1)**2
         macro_vels = np.matmul(self.F, self.vels)/np.expand_dims(rho,2)
         micro_vels = np.expand_dims(self.F, 3)*np.expand_dims(self.vels, (0,1))/np.expand_dims(self.F, 3)
         rel_sq_vels = np.linalg.norm(micro_vels - np.expand_dims(macro_vels,2), axis=3)**2
