@@ -7,6 +7,9 @@ import json
 import shutil
 import cv2
 
+KB = 1.380649e-23
+
+
 def get_circle_plug_map(ydim, xdim, loc, num_per_col, num_col, rad, col_spacing, packing_method):
     # copute vertical spacing, calculate radius in pixels
     vert_spacing = int(ydim/num_per_col)
@@ -119,7 +122,7 @@ def get_plug_map(ydim, xdim, plug_type, **kwargs):
         return None
 
 class FlowTube:
-    def __init__(self, ydim, xdim, plug_map=None, tau=0.6, init_noise=0.2, inflow_density=100, inflow_noise=0.1, outflow_density=50, outflow_noise=0.1, plot_every=1):
+    def __init__(self, ydim, xdim, plug_map=None, tau=0.6, init_noise=0.2, inflow_density=100, inflow_noise=0.1, outflow_density=50, outflow_noise=0.1, plot_every=1, init_flow_multiplier=2, particle_mass=1, lattice_spacing=1, init_density_multiplier=1):
         # set global variables
         self.ydim = ydim
         self.xdim = xdim
@@ -131,6 +134,10 @@ class FlowTube:
         self.outflow_noise = outflow_noise
         self.plot_every = plot_every
         self.pbar = None
+        # set physics vars
+        self.particle_mass = particle_mass
+        self.lattice_spacing = lattice_spacing
+        self.dV = self.lattice_spacing**3
 
         # get physical positions of particles
         self.xlocs, self.ylocs = np.meshgrid(range(self.xdim), range(self.ydim))
@@ -139,13 +146,15 @@ class FlowTube:
         self.nvels = 9
         self.vel_y = np.array([0, 1, 1, 0, -1, -1, -1, 0, 1])
         self.vel_x = np.array([0, 0, 1, 1, 1, 0, -1, -1, -1])
+        self.vels = np.array([self.vel_y, self.vel_x]).reshape(self.nvels,2)
+        self.vel_mag = np.sqrt(self.vel_y**2 + self.vel_x**2)
         self.weights = np.array([4/9, 1/9, 1/36, 1/9, 1/36, 1/9, 1/36, 1/9, 1/36])
 
         # create lattice & setup initial conditions
         self.F = np.ones((self.ydim, self.xdim, self.nvels))
         self.F += init_noise * np.random.randn(ydim, xdim, self.nvels)
         rho = np.sum(self.F, axis=2).reshape(self.ydim, self.xdim, 1)
-        xrho_distribution = np.linspace(self.inflow_density*2, self.outflow_density*2, self.xdim).reshape(1, self.xdim, 1)
+        xrho_distribution = np.linspace(self.inflow_density*init_flow_multiplier, self.outflow_density*init_flow_multiplier, self.xdim).reshape(1, self.xdim, 1)
         self.F = self.F * (xrho_distribution/rho)
 
         # make sure velocities are positive
@@ -268,7 +277,7 @@ class FlowTube:
         vels = np.sqrt(ux**2 + uy**2)
         vels[self.boundaries] = 0
         return vels
-    
+
     def get_density_frame(self):
         rho = np.sum(self.F, axis=2)
         rho[self.boundaries] = 0
@@ -302,14 +311,21 @@ class FlowTube:
             self.fig = plt.figure(dpi=300)
         else:
             self.fig = plt.figure()
-        ((self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = self.fig.subplots(2,2)
+        ((self.T_ax, self.xT_ax), (self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = self.fig.subplots(3,2)
         plt.tight_layout(pad=1.4)
-        
+
+        self.T_ax.set_title('Temperature Heat Map')
+        frame, tmin, tmax = self.get_temperature_frame()
+        self.T_map = self.T_ax.imshow(frame, vmin=tmin, vmax=tmax)
+
         self.v_ax.set_title('Velocity Heat Map')
         self.v_map = self.v_ax.imshow(self.get_velocity_frame())
 
         self.d_ax.set_title('Density Heat Map')
         self.d_map = self.d_ax.imshow(self.get_density_frame())
+
+        self.xT_ax.set_title('X Average Temperature')
+        self.xT_graph, = self.xT_ax.plot(self.get_x_temperature())
 
         self.xv_ax.set_title('X Velocity')
         self.xv_graph, = self.xv_ax.plot(self.get_x_velocity())
@@ -326,6 +342,9 @@ class FlowTube:
         
         if self.pbar is not None:
             self.pbar.update(self.plot_every)
+
+        frame, tmin, tmax = self.get_temperature_frame()
+        self.T_map = self.T_ax.imshow(frame, vmin=tmin, vmax=tmax)
 
         self.v_map.set_data(self.get_velocity_frame())
         self.v_map.autoscale()
@@ -347,8 +366,17 @@ class FlowTube:
         self.xd_ax.set_ylim(xd_mid - xd_range * 0.6, xd_mid + xd_range * 0.6)
         self.xd_graph.set_ydata(xd)
 
+        xT = self.get_x_temperature()
+        xT_mid = (np.min(xT) + np.max(xT))/2
+        xT_range = np.max(xT) - np.min(xT)
+        xT_range = max(xT_range, 1e-10)
+        self.xT_ax.set_ylim(xT_mid - xT_range * 0.6, xT_mid + xT_range * 0.6)
+        self.xT_graph.set_ydata(xT)
+
+        self.T_ax.figure.canvas.draw()
         self.v_ax.figure.canvas.draw()
         self.d_ax.figure.canvas.draw()
+        self.xT_ax.figure.canvas.draw()
         self.xv_ax.figure.canvas.draw()
         self.xd_ax.figure.canvas.draw()
 
@@ -405,6 +433,22 @@ class FlowTube:
 
                 plt.pause(1/fps)
 
+    def get_temperature_frame(self):
+        rho = np.sum(self.F, axis=2)
+        macro_vels = np.matmul(self.F, self.vels)/rho.reshape(*rho.shape, 1)
+        diff_sq_vels = np.sum((self.vels.reshape(1,1,self.nvels,2) - macro_vels.reshape(self.ydim, self.xdim, 1, 2))**2, axis=3)
+        mean_squared_vel = np.sum(self.F * diff_sq_vels, axis=2)/rho
+        mean_KE = 0.5 * self.particle_mass * mean_squared_vel
+        out = (mean_KE / KB)*(1-self.boundaries)
+        a = np.min(out[self.boundaries == 0])
+        b = np.max(out[self.boundaries == 0])
+        return out, a, b
+
+    def get_x_temperature(self):
+        frame, _, _ = self.get_temperature_frame()
+        return np.sum(frame, axis=0)/np.sum(1-self.boundaries, axis=0)
+
+
 if __name__ == '__main__':
     # Check input
     if not os.path.isfile('./variables.json'):
@@ -416,6 +460,7 @@ if __name__ == '__main__':
         cfg = invars['config']
         args = invars['args']
         plug_args = invars['plug']
+        phys_args = invars['physics']
     # Check output
     outdir = cfg['output_dir']
     i = 0
@@ -424,14 +469,14 @@ if __name__ == '__main__':
         outdir = cfg['output_dir'] + f' ({i})'
     # Set up the simulation
     plug_map = get_plug_map(args['ydim'], args['xdim'], **plug_args)
-    ft = FlowTube(**args, plug_map=plug_map)
+    ft = FlowTube(**args, **phys_args, plug_map=plug_map)
     gifwriter = animation.PillowWriter(fps=cfg['fps'])
     ft.init_anim(dpi=cfg['dpi'])
     num_steps = cfg['num_steps']
     num_frames = num_steps//ft.plot_every
     ft.init_pbar(num_steps)
     anim = animation.FuncAnimation(ft.fig, ft.anim, frames=num_frames, blit=True)
-    
+
     # save stuff
     os.makedirs(outdir)
     shutil.copy('./variables.json', os.path.join(outdir, 'variables.json'))
