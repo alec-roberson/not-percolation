@@ -311,12 +311,13 @@ class FlowTube:
             self.fig = plt.figure(dpi=300)
         else:
             self.fig = plt.figure()
-        ((self.T_ax, self.xT_ax), (self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = self.fig.subplots(3,2)
+        ((self.E_ax, self.xE_ax), (self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = self.fig.subplots(3,2)
         plt.tight_layout(pad=1.4)
 
-        self.T_ax.set_title('Temperature Heat Map')
-        frame, tmin, tmax = self.get_temperature_frame()
-        self.T_map = self.T_ax.imshow(frame, vmin=tmin, vmax=tmax)
+        self.E_ax.set_title('Internal Energy Heat Map')
+        frame = self.get_energy_density()
+        emin, emax = np.min(frame), np.max(frame)
+        self.E_map = self.E_ax.imshow(frame, vmin=emin, vmax=emax)
 
         self.v_ax.set_title('Velocity Heat Map')
         self.v_map = self.v_ax.imshow(self.get_velocity_frame())
@@ -324,8 +325,8 @@ class FlowTube:
         self.d_ax.set_title('Density Heat Map')
         self.d_map = self.d_ax.imshow(self.get_density_frame())
 
-        self.xT_ax.set_title('X Average Temperature')
-        self.xT_graph, = self.xT_ax.plot(self.get_x_temperature())
+        self.xE_ax.set_title('X Average Temperature')
+        self.xT_graph, = self.xE_ax.plot(self.get_x_temperature())
 
         self.xv_ax.set_title('X Velocity')
         self.xv_graph, = self.xv_ax.plot(self.get_x_velocity())
@@ -343,8 +344,9 @@ class FlowTube:
         if self.pbar is not None:
             self.pbar.update(self.plot_every)
 
-        frame, tmin, tmax = self.get_temperature_frame()
-        self.T_map = self.T_ax.imshow(frame, vmin=tmin, vmax=tmax)
+        frame = self.get_energy_density()
+        emin, emax = np.min(frame), np.max(frame)
+        self.T_map = self.E_ax.imshow(frame, vmin=emin, vmax=emax)
 
         self.v_map.set_data(self.get_velocity_frame())
         self.v_map.autoscale()
@@ -370,13 +372,13 @@ class FlowTube:
         xT_mid = (np.min(xT) + np.max(xT))/2
         xT_range = np.max(xT) - np.min(xT)
         xT_range = max(xT_range, 1e-10)
-        self.xT_ax.set_ylim(xT_mid - xT_range * 0.6, xT_mid + xT_range * 0.6)
+        self.xE_ax.set_ylim(xT_mid - xT_range * 0.6, xT_mid + xT_range * 0.6)
         self.xT_graph.set_ydata(xT)
 
-        self.T_ax.figure.canvas.draw()
+        self.E_ax.figure.canvas.draw()
         self.v_ax.figure.canvas.draw()
         self.d_ax.figure.canvas.draw()
-        self.xT_ax.figure.canvas.draw()
+        self.xE_ax.figure.canvas.draw()
         self.xv_ax.figure.canvas.draw()
         self.xd_ax.figure.canvas.draw()
 
@@ -432,22 +434,16 @@ class FlowTube:
                 xv_fig.set_ylim(xv_mid - xv_range * 0.6, xv_mid + xv_range * 0.6)
 
                 plt.pause(1/fps)
-
-    def get_temperature_frame(self):
+    
+    def get_energy_density_dist(self):
         rho = np.sum(self.F, axis=2)
-        sq_vels = np.linalg.norm(self.vels, axis=1)**2
         macro_vels = np.matmul(self.F, self.vels)/np.expand_dims(rho,2)
-        micro_vels = np.expand_dims(self.F, 3)*np.expand_dims(self.vels, (0,1))/np.expand_dims(self.F, 3)
+        micro_vels = np.expand_dims(self.vels, (0,1))
         rel_sq_vels = np.linalg.norm(micro_vels - np.expand_dims(macro_vels,2), axis=3)**2
-        kinetic_energy = np.sum((rel_sq_vels*self.F), axis=2)/rho
-        temp = kinetic_energy/KB
-        temp = temp * (1-self.boundaries)
-        return temp, np.min(temp[self.boundaries==0]), np.max(temp[self.boundaries==0])
-
-    def get_x_temperature(self):
-        frame, _, _ = self.get_temperature_frame()
-        return np.sum(frame, axis=0)/np.sum(1-self.boundaries, axis=0)
-
+        return rel_sq_vels * self.F / 2
+    
+    def get_energy_density(self):
+        return np.sum(self.get_energy_density_dist(), axis=2)
 
 if __name__ == '__main__':
     # Check input
