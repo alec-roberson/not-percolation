@@ -2,28 +2,33 @@
     "args":{
         "ydim":100,
         "xdim":300,
-        "tau":0.7, 
+        "tau":1.0, 
         "init_noise":0.1,
-        "inflow_density":500,
+        "inflow_density":200,
         "inflow_noise":0.5,
         "outflow_density":100,
         "outflow_noise":0.1,
-        "plot_every":10
+        "plot_every":10,
+        "init_density_multiplier":2
+    },
+    "physics":{
+        "particle_mass":4.65e-26,
+        "lattice_spacing":1e-8
     },
     "plug":{
         "plug_type": "circle",
-        "loc":0.3,
+        "loc":0.4,
         "num_per_col":1,
         "num_col":1,
-        "rad":0.2,
+        "rad":0.5,
         "col_spacing":1.0,
         "packing_method":"standard"
     },
     "config":{
-        "output_dir":"./circle",
+        "output_dir":"./testing",
         "fps":10,
         "dpi":150,
-        "num_steps":2500
+        "num_steps":1000
     },
     "notes":"relatively noisy flow around a single cylinder"
 }
