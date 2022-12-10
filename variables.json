@@ -1,34 +1,36 @@
 {   
     "args":{
-        "ydim":100,
-        "xdim":300,
-        "tau":1.0, 
-        "init_noise":0.1,
-        "inflow_density":400,
-        "inflow_noise":0.5,
+        "ydim": 300,
+        "xdim": 500,
+        "tau": 2.5, 
+        "init_noise":0.02,
+        "inflow_density":150,
+        "inflow_noise":0.05,
         "outflow_density":100,
-        "outflow_noise":0.1,
-        "plot_every":10,
-        "init_density_multiplier":2
+        "outflow_noise":0.05,
+        "plot_every":100,
+        "init_density_multiplier":2.0,
+        "boundary_loss":0.0,
+        "boundary_randomness":0.0
     },
     "physics":{
-        "particle_mass":4.65e-26,
-        "lattice_spacing":1e-8
+        "lattice_spacing":0.1,
+        "delta_t":0.001
     },
     "plug":{
         "plug_type": "circle",
-        "loc":0.4,
-        "num_per_col":1,
-        "num_col":1,
-        "rad":0.5,
+        "loc":0.5,
+        "num_per_col":10,
+        "num_col":5,
+        "rad":0.95,
         "col_spacing":1.0,
         "packing_method":"standard"
     },
     "config":{
-        "output_dir":"./testing",
+        "output_dir":"./circle-0.95",
         "fps":10,
-        "dpi":150,
-        "num_steps":1000
+        "dpi":300,
+        "num_steps":2000
     },
-    "notes":"relatively noisy flow around a single cylinder"
+    "notes":""
 }

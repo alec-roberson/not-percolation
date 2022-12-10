@@ -122,39 +122,48 @@ def get_plug_map(ydim, xdim, plug_type, **kwargs):
         return None
 
 class FlowTube:
-    def __init__(self, ydim, xdim, plug_map=None, tau=0.6, init_noise=0.2, inflow_density=100, inflow_noise=0.1, outflow_density=50, outflow_noise=0.1, plot_every=1, init_flow_multiplier=2, particle_mass=1, lattice_spacing=1, init_density_multiplier=1):
+    # +++ INITIALIZATION +++
+
+    def __init__(self, ydim, xdim, plug_map=None, tau=0.6, init_noise=0.2, inflow_density=100, inflow_noise=0.1, outflow_density=50, outflow_noise=0.1, plot_every=1, particle_mass=1, boundary_loss=0, boundary_randomness=0, init_density_multiplier=1, lattice_spacing=1, delta_t=1):
         # set global variables
         self.ydim = ydim
         self.xdim = xdim
         self.tau = tau
-        # self.inflow_vel = inflow_vel
         self.inflow_density = inflow_density
         self.inflow_noise = inflow_noise
         self.outflow_density = outflow_density
         self.outflow_noise = outflow_noise
-        self.plot_every = plot_every
-        self.pbar = None
-        # set physics vars
+        # boundary parameters
+        self.boundary_loss = boundary_loss
+        self.boundary_randomness = boundary_randomness
+        # physics parameters
+        self.delta_x = lattice_spacing
+        self.delta_t = delta_t
         self.particle_mass = particle_mass
-        self.lattice_spacing = lattice_spacing
-        self.dV = self.lattice_spacing**3
+        self.c = self.delta_x/self.delta_t # lattice velocity
+        self.T = self.c**2 * self.particle_mass / (3*KB)
+        # other variables
+        self.pbar = None # progress bar
+        self.plot_every = plot_every
 
         # get physical positions of particles
         self.xlocs, self.ylocs = np.meshgrid(range(self.xdim), range(self.ydim))
 
         # velocity conversion variables and weights
         self.nvels = 9
-        self.vel_y = np.array([0, 1, 1, 0, -1, -1, -1, 0, 1])
-        self.vel_x = np.array([0, 0, 1, 1, 1, 0, -1, -1, -1])
+        self.disp_y = np.array([0, 1, 1, 0, -1, -1, -1, 0, 1])
+        self.disp_x = np.array([0, 0, 1, 1, 1, 0, -1, -1, -1])
+        self.vel_y = self.disp_y * self.c
+        self.vel_x = self.disp_x * self.c
         self.vels = np.array([self.vel_y, self.vel_x]).reshape(self.nvels,2)
-        self.vel_mag = np.sqrt(self.vel_y**2 + self.vel_x**2)
         self.weights = np.array([4/9, 1/9, 1/36, 1/9, 1/36, 1/9, 1/36, 1/9, 1/36])
 
         # create lattice & setup initial conditions
         self.F = np.ones((self.ydim, self.xdim, self.nvels))
         self.F += init_noise * np.random.randn(ydim, xdim, self.nvels)
+        # normalize density to initial density distribution
         rho = np.sum(self.F, axis=2).reshape(self.ydim, self.xdim, 1)
-        xrho_distribution = np.linspace(self.inflow_density*init_flow_multiplier, self.outflow_density*init_flow_multiplier, self.xdim).reshape(1, self.xdim, 1)
+        xrho_distribution = np.linspace(self.inflow_density*init_density_multiplier, self.outflow_density*init_density_multiplier, self.xdim).reshape(1, self.xdim, 1)
         self.F = self.F * (xrho_distribution/rho)
 
         # make sure velocities are positive
@@ -175,20 +184,14 @@ class FlowTube:
             self.boundaries, 
             self.boundaries[:,-1:]], axis=1)
 
-    def get_source(self):        
-        # set the input flow
+    # +++ HELPER FUNCTIONS +++
 
-        # correct the input flow density
-
+    def get_source(self):
+        # set input flow
         source = np.ones((self.ydim, self.nvels)) + self.inflow_noise * np.random.randn(self.ydim, self.nvels)
-        # source[:,[3]] += self.inflow_vel * np.ones((self.ydim, 1))
+        # normalize input flow
         rho_inflow = np.sum(source, axis=1).reshape(self.ydim, 1)
         source *= self.inflow_density / rho_inflow
-
-        # apply a sinusoidal weighting
-        # weights = 2*np.sin(np.linspace(0,1,self.ydim)*np.pi).reshape(self.ydim, 1)
-        # source *= weights
-        
         # reshape, double, and output
         source = source.reshape(self.ydim, 1, self.nvels)
         source = np.concatenate([source, source], axis=1)
@@ -217,10 +220,12 @@ class FlowTube:
         # remove padding, source on left sink on right
         self.F = self.F[:, 1:-1, :]
 
+    # +++ PHYSICS IMPLEMENTATION +++
+
     def apply_drift(self):
 
         # drift velocities
-        for i, cy, cx in zip(range(self.nvels), self.vel_y, self.vel_x):
+        for i, cy, cx in zip(range(self.nvels), self.disp_y, self.disp_x):
             self.F[:, :, i] = np.roll(self.F[:, :, i], cx, axis = 1)
             self.F[:, :, i] = np.roll(self.F[:, :, i], cy, axis = 0)
 
@@ -239,26 +244,24 @@ class FlowTube:
         # reflect velocities along boundaries
         boundaryF = self.F[self.padded_boundaries, :]
         boundaryF = boundaryF[:, [0, 5, 6, 7, 8, 1, 2, 3, 4]]
-        BOUNDARY_LOSS = 0
-        BOUNDARY_RANDOMNESS = 0.0
         # apply noising to boundary velocities, maintain flow density
         boundary_rho = np.sum(boundaryF, axis=1).reshape(boundaryF.shape[0], 1)
-        boundaryF += np.random.randn(*boundaryF.shape) * BOUNDARY_RANDOMNESS
+        boundaryF += np.random.randn(*boundaryF.shape) * self.boundary_randomness
         boundaryF *= boundary_rho / np.sum(boundaryF, axis=1).reshape(boundaryF.shape[0], 1)
         # apply boundary loss
-        boundaryF *= (1 - BOUNDARY_LOSS)
+        boundaryF *= (1 - self.boundary_loss)
 
         # fluid variables
-        rho = np.sum(self.F, axis=2)
-        uy = np.sum(self.F * self.vel_y, axis=2) / rho
-        ux = np.sum(self.F * self.vel_x, axis=2) / rho
+        num_density = np.sum(self.F, axis=2)
+        uy = np.sum(self.F * self.vel_y, axis=2) / num_density
+        ux = np.sum(self.F * self.vel_x, axis=2) / num_density
+
 
         # calculate equilibrium and apply collisions
         Feq = np.zeros_like(self.F)
         for i, cy, cx, w in zip(range(self.nvels), self.vel_y, self.vel_x, self.weights):
-            Feq[:, :, i] = w * rho * (1 + 3 * (cx * ux + cy * uy) + 9/2 * (cx * ux + cy * uy) ** 2 - 3/2 * (ux ** 2 + uy ** 2))
+            Feq[:, :, i] = w * num_density * (1 + 3 * (cx * ux + cy * uy)/self.c**2 + 9 * (cx * ux + cy * uy) ** 2 / (2*self.c**4) - 3 * (ux ** 2 + uy ** 2)/(2*self.c**2))
         self.F += -(1/self.tau)*(self.F - Feq)
-        # self.F[:,1:-1] += -(1/self.tau)*(self.F[:,1:-1] - Feq[:,1:-1])
 
         # apply boundary conditions
         self.F[self.padded_boundaries, :] = boundaryF
@@ -271,34 +274,20 @@ class FlowTube:
 
     def get_velocity_frame(self):
         ''' Gets the frame of velocities. '''
-        rho = np.sum(self.F, axis=2)
-        ux = np.sum(self.F * self.vel_x, axis=2) / rho
-        uy = np.sum(self.F * self.vel_y, axis=2) / rho
+        num_density = np.sum(self.F, axis=2)
+        ux = np.sum(self.F * self.vel_x, axis=2) / num_density
+        uy = np.sum(self.F * self.vel_y, axis=2) / num_density
         vels = np.sqrt(ux**2 + uy**2)
         vels[self.boundaries] = 0
         return vels
 
-    def get_density_frame(self):
-        rho = np.sum(self.F, axis=2)
-        rho[self.boundaries] = 0
-        return rho
+    def get_num_density_frame(self):
+        num_density = np.sum(self.F, axis=2)
+        num_density[self.boundaries] = 0
+        return num_density
     
-    def get_curl_frame(self):
-        rho = np.sum(self.F, axis=2)
-        ux = np.sum(self.F * self.vel_x, axis=2) / rho
-        uy = np.sum(self.F * self.vel_y, axis=2) / rho
-        ux[self.boundaries] = 0
-        uy[self.boundaries] = 0
-        curl = (np.roll(ux, -1, axis=0) - np.roll(ux, 1, axis=0)) - (np.roll(uy, -1, axis=1) - np.roll(uy, 1, axis=1))
-        curl[self.boundaries] = 0
-        return curl[:,1:-1]
-    
-    def total(self):
-        F = self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1)
-        return np.sum(F), np.max(F), np.min(F)
-    
-    def get_x_density(self):
-        return np.sum(self.F * ~self.boundaries.reshape(self.ydim, self.xdim, 1), axis=(0,2))/np.sum(1-self.boundaries, axis=0)
+    def get_x_num_density(self):
+        return np.sum(self.F * np.expand_dims(1-self.boundaries,2), axis=(0,2))/np.sum(1-self.boundaries, axis=0)
 
     def get_x_velocity(self):
         num_nodes = np.sum(1-self.boundaries, axis=0)
@@ -311,28 +300,29 @@ class FlowTube:
             self.fig = plt.figure(dpi=300)
         else:
             self.fig = plt.figure()
-        ((self.E_ax, self.xE_ax), (self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = self.fig.subplots(3,2)
+        # ((self.E_ax, self.xE_ax), (self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = self.fig.subplots(3,2)
+        ((self.v_ax, self.xv_ax), (self.d_ax, self.xd_ax)) = self.fig.subplots(2,2)
         plt.tight_layout(pad=1.4)
 
-        self.E_ax.set_title('Internal Energy Heat Map')
-        frame = self.get_energy_density()
-        emin, emax = np.min(frame), np.max(frame)
-        self.E_map = self.E_ax.imshow(frame, vmin=emin, vmax=emax)
+        # self.E_ax.set_title('Energy Per Particle Heat Map')
+        # frame = self.get_energy_per_particle()
+        # emin, emax = np.min(frame), np.max(frame)
+        # self.E_map = self.E_ax.imshow(frame, vmin=emin, vmax=emax)
 
-        self.v_ax.set_title('Velocity Heat Map')
+        self.v_ax.set_title('Macro-Velocity Heat Map')
         self.v_map = self.v_ax.imshow(self.get_velocity_frame())
 
-        self.d_ax.set_title('Density Heat Map')
-        self.d_map = self.d_ax.imshow(self.get_density_frame())
+        self.d_ax.set_title('Number Density Heat Map')
+        self.d_map = self.d_ax.imshow(self.get_num_density_frame())
 
-        self.xE_ax.set_title('X Average Temperature')
-        self.xT_graph, = self.xE_ax.plot(self.get_x_temperature())
+        # self.xE_ax.set_title('Mean Energy Per Particle vs. X')
+        # self.xT_graph, = self.xE_ax.plot(self.get_energy_per_particle_x())
 
-        self.xv_ax.set_title('X Velocity')
+        self.xv_ax.set_title('Mean Macro-Velocity vs. X')
         self.xv_graph, = self.xv_ax.plot(self.get_x_velocity())
         
-        self.xd_ax.set_title('X Density')
-        self.xd_graph, = self.xd_ax.plot(self.get_x_density())
+        self.xd_ax.set_title('Mean Number Density vs. X')
+        self.xd_graph, = self.xd_ax.plot(self.get_x_num_density())
 
         return [self.v_map, self.d_map, self.xv_graph, self.xd_graph]
         
@@ -344,14 +334,14 @@ class FlowTube:
         if self.pbar is not None:
             self.pbar.update(self.plot_every)
 
-        frame = self.get_energy_density()
-        emin, emax = np.min(frame), np.max(frame)
-        self.T_map = self.E_ax.imshow(frame, vmin=emin, vmax=emax)
+        # frame = self.get_energy_per_particle()
+        # emin, emax = np.min(frame), np.max(frame)
+        # self.T_map = self.E_ax.imshow(frame, vmin=emin, vmax=emax)
 
         self.v_map.set_data(self.get_velocity_frame())
         self.v_map.autoscale()
 
-        self.d_map.set_data(self.get_density_frame())
+        self.d_map.set_data(self.get_num_density_frame())
         self.d_map.autoscale()
 
         xv = self.get_x_velocity()
@@ -361,24 +351,24 @@ class FlowTube:
         self.xv_ax.set_ylim(xv_mid - xv_range * 0.6, xv_mid + xv_range * 0.6)
         self.xv_graph.set_ydata(xv)
 
-        xd = self.get_x_density()
+        xd = self.get_x_num_density()
         xd_mid = (np.min(xd) + np.max(xd))/2
         xd_range = np.max(xd) - np.min(xd)
         xd_range = max(xd_range, 1e-10)
         self.xd_ax.set_ylim(xd_mid - xd_range * 0.6, xd_mid + xd_range * 0.6)
         self.xd_graph.set_ydata(xd)
 
-        xT = self.get_x_temperature()
-        xT_mid = (np.min(xT) + np.max(xT))/2
-        xT_range = np.max(xT) - np.min(xT)
-        xT_range = max(xT_range, 1e-10)
-        self.xE_ax.set_ylim(xT_mid - xT_range * 0.6, xT_mid + xT_range * 0.6)
-        self.xT_graph.set_ydata(xT)
+        # xT = self.get_energy_per_particle_x()
+        # xT_mid = (np.min(xT) + np.max(xT))/2
+        # xT_range = np.max(xT) - np.min(xT)
+        # xT_range = max(xT_range, 1e-10)
+        # self.xE_ax.set_ylim(xT_mid - xT_range * 0.6, xT_mid + xT_range * 0.6)
+        # self.xT_graph.set_ydata(xT)
 
-        self.E_ax.figure.canvas.draw()
+        # self.E_ax.figure.canvas.draw()
         self.v_ax.figure.canvas.draw()
         self.d_ax.figure.canvas.draw()
-        self.xE_ax.figure.canvas.draw()
+        # self.xE_ax.figure.canvas.draw()
         self.xv_ax.figure.canvas.draw()
         self.xd_ax.figure.canvas.draw()
 
@@ -390,60 +380,24 @@ class FlowTube:
     def close_pbar(self):
         self.pbar.close()
     
-    def anim_loop(self, N, plot_every=1, fps=30):
-        velfig = plt.subplot(2, 2, 1)
-        velfig.set_title('Velocity Heat Map')
-        velim = velfig.imshow(self.get_velocity_frame())
-        rhofig = plt.subplot(2, 2, 3)
-        rhofig.set_title('Density Heat Map')
-        rhoim = rhofig.imshow(self.get_density_frame())
-        # curlfig = plt.subplot(3, 2, 5)
-        # curlfig.set_title('Curl Heat Map')
-        # curlim = curlfig.imshow(self.get_curl_frame(), cmap='bwr')
-        xd_fig = plt.subplot(2,2,2)
-        xd_fig.set_title('X Density')
-        xd_l, = xd_fig.plot(self.get_x_density())
-        xv_fig = plt.subplot(2,2,4)
-        xv_fig.set_title('X Velocity')
-        xv_l, = xv_fig.plot(self.get_x_velocity())
-        plt.tight_layout(pad=1)
-        for i in range(N):
-            self.update_frame()
-            if i % plot_every == 0:
-                velim.set_data(self.get_velocity_frame())
-                velim.autoscale()
-
-                rhoim.set_data(self.get_density_frame())
-                rhoim.autoscale()
-
-                # cframe = self.get_curl_frame()
-                # curlim.set_data(cframe)
-                # l = np.max(np.abs(cframe))
-                # curlim.set_clim(-l, l)
-
-                xd = self.get_x_density()
-                xd_l.set_ydata(xd)
-                xd_mid = (np.min(xd) + np.max(xd))/2
-                xd_range = np.max(xd) - np.min(xd)
-                xd_fig.set_ylim(xd_mid - xd_range * 0.6, xd_mid + xd_range * 0.6)
-                
-                xv = self.get_x_velocity()
-                xv_l.set_ydata(xv)
-                xv_mid = (np.min(xv) + np.max(xv))/2
-                xv_range = np.max(xv) - np.min(xv)
-                xv_fig.set_ylim(xv_mid - xv_range * 0.6, xv_mid + xv_range * 0.6)
-
-                plt.pause(1/fps)
-    
-    def get_energy_density_dist(self):
+    def get_energy_dist(self):
         rho = np.sum(self.F, axis=2)
         macro_vels = np.matmul(self.F, self.vels)/np.expand_dims(rho,2)
         micro_vels = np.expand_dims(self.vels, (0,1))
         rel_sq_vels = np.linalg.norm(micro_vels - np.expand_dims(macro_vels,2), axis=3)**2
         return rel_sq_vels * self.F / 2
     
-    def get_energy_density(self):
-        return np.sum(self.get_energy_density_dist(), axis=2)
+    def get_energy_per_particle(self):
+        rho = np.sum(self.F, axis=2)
+        energy_per_part = np.sum(self.get_energy_dist(), axis=2)/rho
+        energy_per_part[self.boundaries] = 0
+        return energy_per_part
+
+    def get_energy_per_particle_x(self):
+        out = np.sum(self.get_energy_per_particle(), axis=0)/np.sum(1-self.boundaries, axis=0)
+        return out
+
+
 
 if __name__ == '__main__':
     # Check input
@@ -477,3 +431,4 @@ if __name__ == '__main__':
     os.makedirs(outdir)
     shutil.copy('./variables.json', os.path.join(outdir, 'variables.json'))
     anim.save(os.path.join(outdir, 'animation.gif'), writer=gifwriter)
+    plt.savefig(os.path.join(outdir,"last_frame.png"), dpi=cfg['dpi'])
